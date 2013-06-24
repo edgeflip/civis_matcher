@@ -72,7 +72,6 @@ class CivisMatcher(object):
             'last_name': last_name
         })
         resp = requests.get(url, auth=self.auth, params=request_params)
-        data = json.loads(resp.content)
         if resp.status_code != 200:
             raise MatchException(
                 'Invalid response code: %s, url: %s' % (
@@ -81,6 +80,7 @@ class CivisMatcher(object):
                 )
             )
 
+        data = json.loads(resp.content)
         if data['error']:
             raise MatchException(
                 'Error returned by Civis: id: %s, message: %s, url: %s' % (
@@ -91,5 +91,4 @@ class CivisMatcher(object):
             )
 
         data['result'].update({'url': resp.url})
-
         return MatchResult(**data['result'])
