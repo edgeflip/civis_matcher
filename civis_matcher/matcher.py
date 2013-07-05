@@ -1,7 +1,7 @@
 import json
+import hashlib
 
 import pylibmc
-import hashlib
 import requests
 from urllib import urlencode
 
