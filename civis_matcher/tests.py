@@ -9,12 +9,27 @@ class TestCivisMatcher(unittest.TestCase):
 
     def setUp(self):
         super(TestCivisMatcher, self).setUp()
+
+        # Requests Mock
         self.orig_requests_get = matcher.requests.get
         self.requests_mock = Mock()
         matcher.requests.get = self.requests_mock
-        self.cm = matcher.CivisMatcher()
+
+        # pylibmc Mock
+        self.orig_cache_client = matcher.pylibmc.Client
+        self.cache_mock = Mock()
+        self.client_mock = Mock()
+        self.client_mock.set.return_value = None
+        self.client_mock.get.return_value = None
+        self.cache_mock.return_value = self.client_mock
+        matcher.pylibmc.Client = self.cache_mock
+
+        self.cm = matcher.CivisMatcher(cache_hosts=['127.0.0.1'])
 
     def tearDown(self):
+        matcher.requests.get = self.orig_requests_get
+        matcher.pylibmc.Client = self.orig_cache_client
+
         super(TestCivisMatcher, self).tearDown()
 
     def test_invalid_status_code(self):
