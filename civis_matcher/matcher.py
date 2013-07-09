@@ -35,8 +35,9 @@ class MatchResult(Struct):
     def __init__(self, **entries):
         self.__dict__.update(entries)
         people_list = []
-        for person in self.people:
-            people_list.append(Person(**person))
+        if self.people:
+            for person in self.people:
+                people_list.append(Person(**person))
 
         self.people = people_list
 
