@@ -35,8 +35,9 @@ class MatchResult(Struct):
     def __init__(self, **entries):
         self.__dict__.update(entries)
         people_list = []
-        for person in self.people:
-            people_list.append(Person(**person))
+        if self.people:
+            for person in self.people:
+                people_list.append(Person(**person))
 
         self.people = people_list
 
@@ -83,7 +84,7 @@ class CivisMatcher(object):
         ''' Makes an actual call to Civis in the event that we don't already
         have anything stored in the cache
         '''
-        resp = requests.get(url, auth=self.auth)
+        resp = requests.get(url, auth=self.auth, timeout=5)
         if resp.status_code != 200:
             raise MatchException(
                 'Invalid response code: %s, url: %s' % (
