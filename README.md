@@ -1,10 +1,20 @@
-civis_matcher
-=============
+# Civis Matcher
 
 Library for wrapping the Civis Analytics Matching API
 
-Usage:
--------------
+## Installation:
+
+This package depends on `libmemcached-dev`, as it has optional caching 
+support built-in. After that it's as simple as:
+
+    git clone https://github.com/edgeflip/civis_matcher
+    cd civis_matcher
+    pip install -r requirements.txt
+    python setup.py develop
+
+After that, you should be good to go.
+
+## Usage:
 
 Using the Civis Matcher API is fairly straightforward:
 
@@ -59,3 +69,45 @@ attributes:
 * score
 * TokenCount
 * nick_name
+
+### Bulk Matching
+
+Civis recently gave us the ability to perform bulk match queries. These will 
+help cut down on making large quantities of calls to check a large dataset for 
+matches. In order to use this service, you need to build a `dict` like so:
+
+
+    {'people': {
+        '01': {
+            'first_name': 'Test',
+            'last_name': 'User1',
+            'state': 'IL',
+            'city': 'Chicago',
+        },
+        '02': {
+            'first_name': 'Test',
+            'last_name': 'User2',
+            'state': 'IL',
+            'city': 'Chicago',
+        }
+    }
+
+The '01', '02', etc. can be whatever you desire. Any unique identifier that'll
+help you match results back to where you generated the `dict` from will work
+just fine. After you've built that structure, you can do the following:
+
+    from civis_matcher import matcher
+    cm = matcher.CivisMatcher()
+    result = cm.bulk_match(YOUR_DICTIONARY)
+
+The structure of the result object will be like so:
+
+    {
+        u'0': MatchResult: Object,
+        u'1': MatchResult: Object,
+        u'2': MatchResult: Object,
+        u'3': MatchResult: Object
+    }
+
+The `MatchResult` objects are not any different than what you'd get if you did
+a single match against the API. 
