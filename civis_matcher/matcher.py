@@ -220,5 +220,6 @@ class CivisMatcher(object):
         data, req_url = self._make_request(url, match_dict, 'POST')
         full_result = {}
         for k, v in data.items():
-            full_result[k] = MatchResult(**v['result'])
+            if 'result' in v:
+                full_result[k] = MatchResult(**v['result'])
         return full_result
