@@ -145,7 +145,17 @@ class TestCivisMatcher(unittest.TestCase):
                                 u'turnout_2013_dec': 9},
                             u'state': u'VA'}],
                     u'people_count': 1,
-                    }
+                    u'scores': {u'gotv_score': {u'count': 1,
+                        u'max': 23.592,
+                        u'mean': 23.592,
+                        u'min': 23.592,
+                        u'std': 0},
+                    u'persuasion_score': {u'count': 1,
+                        u'max': 17.161,
+                        u'mean': 17.161,
+                        u'min': 17.161,
+                        u'std': 0},
+                                }}
                 }
             })
         )
