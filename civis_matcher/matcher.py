@@ -1,5 +1,6 @@
 import json
 import hashlib
+import logging
 
 import pylibmc
 import requests
@@ -7,6 +8,7 @@ from urllib import urlencode
 
 
 CIVIS_BASE_URL = 'http://match.civisanalytics.com'
+logger = logging.getLogger(__name__)
 
 
 class MatchException(Exception):
@@ -55,7 +57,8 @@ class MatchResult(Struct):
 class CivisMatcher(object):
 
     def __init__(self, user='edgeflip', password='civis!19',
-                cache_hosts=[], cache_expiry=3600, base_url=''):
+                 cache_hosts=[], cache_expiry=3600, base_url='',
+                 timeout=5):
         self.auth = (user, password)
         self.caching_enabled = False
         self.expiry = cache_expiry
@@ -65,6 +68,7 @@ class CivisMatcher(object):
 
         # Useful if you want to test against their staging instance
         self.base_url = base_url if base_url else CIVIS_BASE_URL
+        self.timeout = timeout
 
     def _check_cache(self, url, params):
         ''' Checks the cache for Civis match results. Hashes the URL plus the
@@ -73,7 +77,7 @@ class CivisMatcher(object):
         if not self.caching_enabled:
             return None
 
-        url_hash = hashlib.md5('%s?%s' % (url, params)).hexdigest()
+        url_hash = hashlib.md5('%s?%s' % (url, urlencode(params))).hexdigest()
         return self.cache.get(url_hash)
 
     def _set_cache(self, url, params, data):
@@ -86,6 +90,10 @@ class CivisMatcher(object):
 
     def _validate_result(self, resp):
         if resp.status_code != 200:
+            logger.error('Invalid status code (%s) on %s' % (
+                resp.status_code,
+                resp.url
+            ))
             raise MatchException(
                 'Invalid response code: %s, url: %s' % (
                     resp.status_code,
@@ -95,6 +103,10 @@ class CivisMatcher(object):
 
         data = json.loads(resp.content)
         if data.get('error'):
+            logger.error('Civis Error: %s, %s' % (
+                data['error_id'],
+                data['error_message']
+            ))
             raise MatchException(
                 'Error returned by Civis: id: %s, message: %s, url: %s' % (
                     data['error_id'],
@@ -105,14 +117,15 @@ class CivisMatcher(object):
         return data
 
     def _get(self, url, params):
-        resp = requests.get(url, auth=self.auth, timeout=5)
+        req_url = '%s?%s' % (url, urlencode(params))
+        resp = requests.get(req_url, auth=self.auth, timeout=self.timeout)
         data = self._validate_result(resp)
         self._set_cache(url, params, data)
         return data
 
     def _post(self, url, params):
         resp = requests.post(url, data=json.dumps(params),
-                            auth=self.auth, timeout=5)
+                            auth=self.auth, timeout=self.timeout)
         data = self._validate_result(resp)
         post_url = '%s?%s' % (url, urlencode(params))
         self._set_cache(post_url, params, data)
@@ -222,4 +235,6 @@ class CivisMatcher(object):
         for k, v in data.items():
             if 'result' in v:
                 full_result[k] = MatchResult(**v['result'])
+            else:
+                logger.warn('Match Result Error: %s' % v)
         return full_result
