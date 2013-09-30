@@ -1,6 +1,10 @@
 import json
 import hashlib
 import logging
+from datetime import datetime, timedelta
+
+import boto
+from boto.exception import S3ResponseError
 
 import pylibmc
 import requests
@@ -8,6 +12,7 @@ from urllib import urlencode
 
 
 CIVIS_BASE_URL = 'http://match.civisanalytics.com'
+TIME_FORMAT = '%m-%d-%y_%H:%M:%S'
 logger = logging.getLogger(__name__)
 
 
@@ -238,3 +243,80 @@ class CivisMatcher(object):
             else:
                 logger.warn('Match Result Error: %s' % v)
         return full_result
+
+
+class S3CivisMatcher(CivisMatcher):
+
+    def __init__(self, aws_access_key_id, aws_secret_access_key,
+                 user='edgeflip', password='civis!19',
+                 bucket='civis_cache', cache_expiry_days=30,
+                 base_url='', timeout=5):
+        self.auth = (user, password)
+        self.caching_enabled = False
+        self.expiry = datetime.now() - timedelta(days=cache_expiry_days)
+        self.base_url = base_url if base_url else CIVIS_BASE_URL
+        self.timeout = timeout
+        self.s3_conn = boto.connect_s3(
+            aws_access_key_id, aws_secret_access_key
+        )
+        self.bucket = self._get_bucket(bucket)
+
+    def _get_bucket(self, bucket_name):
+        ''' Retrieves bucket if it exists, otherwise creates it '''
+        try:
+            bucket = self.s3_conn.get_bucket(bucket_name)
+        except S3ResponseError:
+            try:
+                bucket = self.s3_conn.create_bucket(bucket_name)
+            except S3ResponseError:
+                logger.error(
+                    'Failed to obtain connection to bucket: %s' % bucket_name
+                )
+                raise
+
+        return bucket
+
+    def cache_match(self, fbids):
+        missing_count = 0
+        match_results = {}
+        for fbid in fbids:
+            key = self.bucket.get_key(fbid)
+            if not key:
+                missing_count += 1
+                continue
+
+            match_results[fbid] = json.loads(key.get_contents_as_string())
+
+        return match_results, missing_count
+
+    def _store_match_results(self, data):
+        for fbid, match in data.iteritems():
+            match_key = self.bucket.get_key(fbid)
+            if match_key:
+                stored_json = json.loads(match_key.get_contents_as_string())
+            else:
+                match_key = self.bucket.new_key(fbid)
+                stored_json = {}
+
+            people_count = stored_json.get('result', {}).get('people_count', 0)
+            match_count = match.get('result', {}).get('people_count', 0)
+            cache_time = datetime.strptime(
+                stored_json.get('timestamp', datetime.now().strftime(TIME_FORMAT)),
+                TIME_FORMAT
+            )
+            if (not stored_json or
+                    match_count > people_count or
+                    cache_time < self.expiry):
+                match['timestamp'] = datetime.now().strftime(TIME_FORMAT)
+                match_key.set_contents_from_string(json.dumps(match))
+
+    def bulk_match(self, match_dict, raw=False):
+        ''' Very similar to its parent in regards to how the bulk matching
+        is performed, however it does contain some minor differences. Instead
+        of returning result objects, this will return raw JSON, and also
+        will store that raw JSON in S3 for later usage
+        '''
+        url = '%s/multimatch' % self.base_url
+        data, req_url = self._make_request(url, match_dict, 'POST')
+        self._store_match_results(data)
+        return data
