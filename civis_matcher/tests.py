@@ -1,14 +1,17 @@
 import unittest
 import json
-from mock import Mock
+from datetime import datetime, timedelta
+
+from mock import Mock, patch
+from boto.exception import S3ResponseError
 
 from civis_matcher import matcher
 
 
-class TestCivisMatcher(unittest.TestCase):
+class BaseCivisMatcher(unittest.TestCase):
 
     def setUp(self):
-        super(TestCivisMatcher, self).setUp()
+        super(BaseCivisMatcher, self).setUp()
 
         # Requests Mock
         self.orig_requests_get = matcher.requests.get
@@ -33,7 +36,10 @@ class TestCivisMatcher(unittest.TestCase):
         matcher.requests.post = self.orig_requests_post
         matcher.pylibmc.Client = self.orig_cache_client
 
-        super(TestCivisMatcher, self).tearDown()
+        super(BaseCivisMatcher, self).tearDown()
+
+
+class TestCivisMatcher(BaseCivisMatcher):
 
     def test_invalid_status_code(self):
         ''' Tests what occurs when CivisMatcher is given an invalid, non-200
@@ -189,3 +195,124 @@ class TestCivisMatcher(unittest.TestCase):
         self.assertEqual(result.people[0].first_name, 'TEST')
         self.assertEqual(result.people[0].last_name, 'USER')
         self.assertEqual(result.people[0].scores['persuasion_score'], 25.59)
+
+
+class TestS3CivisMatcher(BaseCivisMatcher):
+
+    def setUp(self):
+        super(TestS3CivisMatcher, self).setUp()
+        self.orig_boto = matcher.boto
+        self.boto_mock = Mock()
+        matcher.boto = self.boto_mock
+        self.cm = matcher.S3CivisMatcher('KEY', 'SECRET_KEY')
+        self.civis_result = {
+            u'123456': {
+                u'error': False,
+                u'result': {u'more_people': False,
+                u'people': [{u'TokenCount': 6,
+                        u'birth_day': u'01',
+                        u'birth_month': u'12',
+                        u'birth_year': u'1969',
+                        u'city': u'CHARLOTTESVILLE',
+                        u'dma': u'584',
+                        u'dma_name': u'Charlottesville VA',
+                        u'first_name': u'TEST',
+                        u'gender': u'M',
+                        u'id': u'16595385',
+                        u'last_name': u'USER',
+                        u'nick_name': u'TESTUSER',
+                        u'scores': {
+                            u'gotv_score': 0,
+                            u'persuasion_score': 25.59,
+                            u'persuasion_score_dec': 3,
+                            u'support_cand_2013': 52.085,
+                            u'support_cand_2013_dec': 7,
+                            u'turnout_2013': 85.419,
+                            u'turnout_2013_dec': 9},
+                        u'state': u'VA'}],
+                u'people_count': 1,
+                u'scores': {
+                    u'gotv_score': {
+                        u'count': 1,
+                        u'max': 23.592,
+                        u'mean': 23.592,
+                        u'min': 23.592,
+                        u'std': 0
+                    },
+                    u'persuasion_score': {
+                        u'count': 1,
+                        u'max': 17.161,
+                        u'mean': 17.161,
+                        u'min': 17.161,
+                        u'std': 0
+                    }
+                }}
+            }
+        }
+
+    def tearDown(self):
+        matcher.boto = self.orig_boto
+        super(TestS3CivisMatcher, self).tearDown()
+
+    def test_get_bucket_failure(self):
+        ''' Test the S3 bucket retrieval failure '''
+        self.cm.s3_conn.get_bucket.side_effect = S3ResponseError('o', 'w')
+        self.cm.s3_conn.create_bucket.side_effect = S3ResponseError('oh', 'no')
+        with self.assertRaises(S3ResponseError):
+            self.cm._get_bucket('bad bucket')
+
+    def test_get_bucket_success(self):
+        ''' Test a successful bucket retrieval '''
+        self.cm.s3_conn.get_bucket.return_value = 'mrbucket_rocks'
+        self.assertEqual(
+            self.cm._get_bucket('mrbucket'),
+            'mrbucket_rocks'
+        )
+
+    def test_store_match_results_new_key(self):
+        ''' Tests the _store_match_results method with a new key'''
+        self.cm.bucket = Mock()
+        self.cm.bucket.get_key.return_value = None
+        create_key_mock = Mock()
+        self.cm.bucket.new_key.return_value = create_key_mock
+        self.cm._store_match_results(self.civis_result)
+        assert create_key_mock.set_contents_from_string.called
+        store_data = json.loads(
+            create_key_mock.set_contents_from_string.call_args_list[0][0][0]
+        )
+        self.assertEqual(
+            store_data['result'],
+            self.civis_result['123456']['result']
+        )
+
+    def test_store_match_results_existing_key(self):
+        ''' Test of the result storage where we update an existing key '''
+        self.cm.bucket = Mock()
+        key_mock = Mock()
+        key_data = self.civis_result.copy()
+        key_data['timestamp'] = (datetime.now() - timedelta(days=100)).strftime(
+            matcher.TIME_FORMAT
+        )
+        key_mock.get_contents_as_string.return_value = json.dumps(key_data)
+        self.cm.bucket.get_key.return_value = key_mock
+        self.cm._store_match_results(self.civis_result)
+        assert key_mock.get_contents_as_string.called
+        assert key_mock.set_contents_from_string.called
+
+    def test_store_match_results_key_too_fresh(self):
+        ''' Test result storage where an object is found to be new enough to be
+        trusted
+        '''
+        self.cm.bucket = Mock()
+        key_mock = Mock()
+        key_data = self.civis_result.copy()
+        key_data['123456']['timestamp'] = datetime.now().strftime(
+            matcher.TIME_FORMAT
+        )
+        key_mock.get_contents_as_string.return_value = json.dumps(
+            key_data['123456']
+        )
+        self.cm.bucket.get_key.return_value = key_mock
+        self.cm._store_match_results(self.civis_result)
+        assert key_mock.get_contents_as_string.called
+        assert not key_mock.set_contents_from_string.called
