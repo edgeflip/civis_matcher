@@ -178,7 +178,7 @@ class CivisMatcher(object):
         data['result'].update({'url': req_url})
         return MatchResult(**data['result'])
 
-    def bulk_match(self, match_dict):
+    def bulk_match(self, match_dict, raw=False):
         '''
         Performs a bulk match query against the Civis Matching service. Expects
         a dictionary structured like so:
@@ -236,13 +236,16 @@ class CivisMatcher(object):
         '''
         url = '%s/multimatch' % self.base_url
         data, req_url = self._make_request(url, match_dict, 'POST')
-        full_result = {}
-        for k, v in data.items():
-            if 'result' in v:
-                full_result[k] = MatchResult(**v['result'])
-            else:
-                logger.warn('Match Result Error: %s' % v)
-        return full_result
+        if raw:
+            return data
+        else:
+            full_result = {}
+            for k, v in data.items():
+                if 'result' in v:
+                    full_result[k] = MatchResult(**v['result'])
+                else:
+                    logger.warn('Match Result Error: %s' % v)
+            return full_result
 
 
 class S3CivisMatcher(CivisMatcher):
